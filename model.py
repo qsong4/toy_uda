@@ -27,14 +27,17 @@ class toy_uda:
         self.aug_len = tf.placeholder(tf.int32, [None])
         self.truth = tf.placeholder(tf.int32, [None, self.hp.num_class], name="truth")
         self.is_training = tf.placeholder(tf.bool,shape=None, name="is_training")
+        self.model = True
 
-        self.logits_sup, self.logits_ori, self.logits_aug = self._logits_op()
+        # self.logits_sup, self.logits_ori, self.logits_aug = self._logits_op()
         self.loss = self._loss_op()
         self.acc = self._acc_op()
         self.global_step = self._globalStep_op()
         self.train = self._training_op()
 
-    def create_feed_dict(self, input_sup, input_ori, input_aug, sup_len, ori_len, aug_len, truth, is_training):
+    def create_feed_dict(self, features, is_training=True):
+        input_sup, sup_len, truth, input_ori, ori_len, input_aug, aug_len = features
+
         feed_dict = {
             self.input_sup: input_sup,
             self.input_ori: input_ori,
@@ -42,6 +45,18 @@ class toy_uda:
             self.sup_len: sup_len,
             self.ori_len: ori_len,
             self.aug_len: aug_len,
+            self.truth: truth,
+            self.is_training: is_training,
+        }
+
+        return feed_dict
+
+    def create_feed_dict_dev(self, features, is_training=False):
+        input_sup, sup_len, truth = features
+
+        feed_dict = {
+            self.input_sup: input_sup,
+            self.sup_len: sup_len,
             self.truth: truth,
             self.is_training: is_training,
         }
@@ -115,9 +130,9 @@ class toy_uda:
         input_ori, ori_mask = self.pre_encoder(self.input_ori)
         input_aug, aug_mask = self.pre_encoder(self.input_aug)
 
-        pre_sup = self.encoder(pre_sup, sup_mask)
-        input_ori = self.encoder(input_ori, ori_mask)
-        input_aug = self.encoder(input_aug, aug_mask)
+        pre_sup = self.encode(pre_sup, sup_mask)
+        input_ori = self.encode(input_ori, ori_mask)
+        input_aug = self.encode(input_aug, aug_mask)
 
         return pre_sup, input_ori, input_aug
 
@@ -160,6 +175,11 @@ class toy_uda:
         logits_aug = self.fc_2l(input_aug, num_units=[self.hp.d_ff, self.hp.num_class])
         return logits_sup, logits_ori, logits_aug
 
+    def _log_probs_dev(self):
+        sup_probs = tf.nn.log_softmax(self.logits_sup, axis=-1)
+
+        return sup_probs
+
     def _log_probs(self):
         sup_probs = tf.nn.log_softmax(self.logits_sup, axis=-1)
         ori_probs = tf.nn.log_softmax(self.logits_ori, axis=-1)
@@ -168,7 +188,28 @@ class toy_uda:
         return sup_probs, ori_probs, aug_probs
 
     def _loss_op(self):
-        sup_log_probs, ori_log_probs, aug_log_probs = self._log_probs()
+
+        if self.model:
+            pre_sup, sup_mask = self.pre_encoder(self.input_sup)
+            input_ori, ori_mask = self.pre_encoder(self.input_ori)
+            input_aug, aug_mask = self.pre_encoder(self.input_aug)
+
+            pre_sup = self.encode(pre_sup, sup_mask)
+            input_ori = self.encode(input_ori, ori_mask)
+            input_aug = self.encode(input_aug, aug_mask)
+
+            logits_sup = self.fc_2l(pre_sup, num_units=[self.hp.d_ff, self.hp.num_class])
+            logits_ori = self.fc_2l(input_ori, num_units=[self.hp.d_ff, self.hp.num_class])
+            logits_aug = self.fc_2l(input_aug, num_units=[self.hp.d_ff, self.hp.num_class])
+
+            sup_log_probs, ori_log_probs, aug_log_probs = self._log_probs(logits_sup, logits_ori, logits_aug)
+        else:
+            pre_sup, sup_mask = self.pre_encoder(self.input_sup)
+            pre_sup = self.encode(pre_sup, sup_mask)
+            logits_sup = self.fc_2l(pre_sup, num_units=[self.hp.d_ff, self.hp.num_class])
+
+            sup_log_probs = self._log_probs_dev(logits_sup)
+
 
         with tf.variable_scope("sup_loss"):
 
@@ -198,13 +239,13 @@ class toy_uda:
                         tf.maximum(tf.reduce_sum(loss_mask), 1))
 
         unsup_loss_mask = None
-        if self.hp.is_training and self.hp.unsup_ratio > 0:
+        if self.model and self.hp.unsup_ratio > 0:
             with tf.variable_scope("unsup_loss"):
 
                 unsup_loss_mask = 1
                 if self.hp.uda_softmax_temp != -1:
                     tgt_ori_log_probs = tf.nn.log_softmax(
-                        self.logits_ori / self.hp.uda_softmax_temp,
+                        logits_ori / self.hp.uda_softmax_temp,
                         axis=-1)
                     tgt_ori_log_probs = tf.stop_gradient(tgt_ori_log_probs)
                 else:

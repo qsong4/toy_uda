@@ -12,6 +12,12 @@ class Hparams:
                              help="training data")
     parser.add_argument('--eval', default='./data/snli_test.tsv',
                              help="evaluation data")
+    parser.add_argument('--sup_prepro', default='./data/sup_prepro',
+                        help="evaluation data")
+    parser.add_argument('--unsup_prepro', default='./data/unsup_preprol',
+                        help="evaluation data")
+    parser.add_argument('--dev_prepro', default='./data/dev_prepro',
+                        help="evaluation data")
 
     parser.add_argument('--model_path', default='FImatchE%02dL%.3fA%.3f')
     parser.add_argument('--modeldir', default='./model')
